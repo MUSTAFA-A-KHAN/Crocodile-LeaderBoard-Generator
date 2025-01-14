@@ -41,6 +41,8 @@ func init() {
 
 // Handler function to return all documents
 func getAllDocumentsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")  // You may change this to a more specific origin if needed
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	collection := client.Database("Telegram").Collection("CrocEn")
 	cursor, err := collection.Find(context.TODO(), bson.D{})
 	if err != nil {
@@ -74,6 +76,8 @@ func main() {
 
 // Handler function to count occurrences of each ID
 func countIDOccurrencesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")  // You may change this to a more specific origin if needed
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	collection := client.Database("Telegram").Collection("CrocEn")
 
 	// Aggregation pipeline to count occurrences of each ID
