@@ -79,30 +79,10 @@ func countIDOccurrencesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 	collection := client.Database("Telegram").Collection("CrocEn")
-
+	var pipeline mongo.Pipeline
 	// Extract the optional ID query parameter
 	id := r.URL.Query().Get("id")
-
-	// Build the aggregation pipeline
-	var pipeline mongo.Pipeline
-	if id != "" {
-		// Convert the ID to an integer (MongoDB might store it as an integer)
-		idInt, err := strconv.Atoi(id)
-		if err != nil {
-			http.Error(w, "Invalid ID format. ID must be an integer.", http.StatusBadRequest)
-			return
-		}
-
-		// If an ID is provided, filter by the specific ID
-		pipeline = mongo.Pipeline{
-			{{"$match", bson.D{{Key: "ID", Value: idInt}}}}, // Match documents with the specified ID
-			{{"$group", bson.D{
-				{Key: "_id", Value: "$ID"},                             // Group by the "ID" field
-				{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}}, // Count occurrences
-				{Key: "Name", Value: bson.D{{Key: "$first", Value: "$Name"}}}, // Get the first "Name" encountered for the grouped ID
-			}}},
-		}
-	} else {
+	if id == "" {
 		// If no ID is provided, aggregate for all IDs
 		pipeline = mongo.Pipeline{
 			{{"$group", bson.D{
@@ -112,8 +92,62 @@ func countIDOccurrencesHandler(w http.ResponseWriter, r *http.Request) {
 			}}},
 			{{"$sort", bson.D{{Key: "count", Value: -1}}}}, // Sort by count in descending order
 		}
+	}else{
+
+	// Convert the ID to an integer (if stored as integer in MongoDB)
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		http.Error(w, "Invalid ID format. ID must be an integer.", http.StatusBadRequest)
+		return
 	}
 
+	// Build the aggregation pipeline to compute rank
+	pipeline = mongo.Pipeline{
+		{
+			{"$group", bson.D{
+				{Key: "_id", Value: "$ID"},                             // Group by the "ID" field
+				{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}}, // Count occurrences
+				{Key: "Name", Value: bson.D{{Key: "$first", Value: "$Name"}}}, // Get the first "Name" encountered for the grouped ID
+			}},
+		},
+		{
+			{"$sort", bson.D{
+				{Key: "count", Value: -1}, // Sort by count in descending order
+			}},
+		},
+		{
+			{"$group", bson.D{
+				{Key: "_id", Value: nil}, // Combine into a single array
+				{Key: "leaderboard", Value: bson.D{{Key: "$push", Value: bson.D{
+					{Key: "ID", Value: "$_id"},
+					{Key: "count", Value: "$count"},
+					{Key: "Name", Value: "$Name"},
+				}}}},
+			}},
+		},
+		{
+			{"$unwind", bson.D{
+				{Key: "path", Value: "$leaderboard"},          // Unwind the leaderboard array
+				{Key: "includeArrayIndex", Value: "rank"},     // Include the rank as an index
+			}},
+		},
+		{
+			{"$replaceRoot", bson.D{
+				{Key: "newRoot", Value: bson.D{
+					{Key: "$mergeObjects", Value: bson.A{
+						"$leaderboard",                             // Merge the leaderboard fields
+						bson.D{{Key: "rank", Value: bson.D{{Key: "$add", Value: bson.A{"$rank", 1}}}}}, // Adjust rank to 1-based
+					}},
+				}},
+			}},
+		},
+		{
+			{"$match", bson.D{
+				{Key: "ID", Value: idInt}, // Match the specified ID
+			}},
+		},
+	}
+	}
 	// Execute the aggregation query
 	cursor, err := collection.Aggregate(context.TODO(), pipeline)
 	if err != nil {
@@ -137,4 +171,3 @@ func countIDOccurrencesHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("Error encoding JSON:", err)
 	}
 }
-
